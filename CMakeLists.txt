@@ -1,4 +1,4 @@
-add_library(ImGui
+add_library(imgui
     "imconfig.h"
 	"imgui.h"
 	"imgui.cpp"
