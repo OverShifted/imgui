@@ -1,4 +1,4 @@
-// dear imgui, v1.79
+// dear imgui, v1.80 WIP
 // (widgets code)
 
 /*
@@ -3370,41 +3370,6 @@ bool ImGui::InputFloat4(const char* label, float v[4], const char* format, ImGui
     return InputScalarN(label, ImGuiDataType_Float, v, 4, NULL, NULL, format, flags);
 }
 
-// Prefer using "const char* format" directly, which is more flexible and consistent with other API.
-#ifndef IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-bool ImGui::InputFloat(const char* label, float* v, float step, float step_fast, int decimal_precision, ImGuiInputTextFlags flags)
-{
-    char format[16] = "%f";
-    if (decimal_precision >= 0)
-        ImFormatString(format, IM_ARRAYSIZE(format), "%%.%df", decimal_precision);
-    return InputFloat(label, v, step, step_fast, format, flags);
-}
-
-bool ImGui::InputFloat2(const char* label, float v[2], int decimal_precision, ImGuiInputTextFlags flags)
-{
-    char format[16] = "%f";
-    if (decimal_precision >= 0)
-        ImFormatString(format, IM_ARRAYSIZE(format), "%%.%df", decimal_precision);
-    return InputScalarN(label, ImGuiDataType_Float, v, 2, NULL, NULL, format, flags);
-}
-
-bool ImGui::InputFloat3(const char* label, float v[3], int decimal_precision, ImGuiInputTextFlags flags)
-{
-    char format[16] = "%f";
-    if (decimal_precision >= 0)
-        ImFormatString(format, IM_ARRAYSIZE(format), "%%.%df", decimal_precision);
-    return InputScalarN(label, ImGuiDataType_Float, v, 3, NULL, NULL, format, flags);
-}
-
-bool ImGui::InputFloat4(const char* label, float v[4], int decimal_precision, ImGuiInputTextFlags flags)
-{
-    char format[16] = "%f";
-    if (decimal_precision >= 0)
-        ImFormatString(format, IM_ARRAYSIZE(format), "%%.%df", decimal_precision);
-    return InputScalarN(label, ImGuiDataType_Float, v, 4, NULL, NULL, format, flags);
-}
-#endif // IMGUI_DISABLE_OBSOLETE_FUNCTIONS
-
 bool ImGui::InputInt(const char* label, int* v, int step, int step_fast, ImGuiInputTextFlags flags)
 {
     // Hexadecimal input provided as a convenience but the flag name is awkward. Typically you'd use InputText() to parse your own data, if you want to handle prefixes.
@@ -4046,7 +4011,7 @@ bool ImGui::InputTextEx(const char* label, const char* hint, char* buf, int buf_
         if (state->SelectedAllMouseLock && !io.MouseDown[0])
             state->SelectedAllMouseLock = false;
 
-        // It is ill-defined whether the back-end needs to send a \t character when pressing the TAB keys.
+        // It is ill-defined whether the backend needs to send a \t character when pressing the TAB keys.
         // Win32 and GLFW naturally do it but not SDL.
         const bool ignore_char_inputs = (io.KeyCtrl && !io.KeyAlt) || (is_osx && io.KeySuper);
         if ((flags & ImGuiInputTextFlags_AllowTabInput) && IsKeyPressedMap(ImGuiKey_Tab) && !ignore_char_inputs && !io.KeyShift && !is_readonly)
@@ -6859,7 +6824,7 @@ struct ImGuiTabBarSection
 namespace ImGui
 {
     static void             TabBarLayout(ImGuiTabBar* tab_bar);
-    static ImU32            TabBarCalcTabID(ImGuiTabBar* tab_bar, const char* label);
+    static ImU32            TabBarCalcTabID(ImGuiTabBar* tab_bar, const char* label, ImGuiWindow* docked_window);
     static float            TabBarCalcMaxTabWidth();
     static float            TabBarScrollClamp(ImGuiTabBar* tab_bar, float scrolling);
     static void             TabBarScrollToTab(ImGuiTabBar* tab_bar, ImGuiTabItem* tab, ImGuiTabBarSection* sections);
@@ -6872,7 +6837,7 @@ ImGuiTabBar::ImGuiTabBar()
     ID = 0;
     SelectedTabId = NextSelectedTabId = VisibleTabId = 0;
     CurrFrameVisible = PrevFrameVisible = -1;
-    LastTabContentHeight = 0.0f;
+    CurrTabsContentsHeight = PrevTabsContentsHeight = 0.0f;
     WidthAllTabs = WidthAllTabsIdeal = 0.0f;
     ScrollingAnim = ScrollingTarget = ScrollingTargetDistToVisibility = ScrollingSpeed = 0.0f;
     ScrollingRectMinX = ScrollingRectMaxX = 0.0f;
@@ -6944,16 +6909,16 @@ bool    ImGui::BeginTabBarEx(ImGuiTabBar* tab_bar, const ImRect& tab_bar_bb, ImG
     g.CurrentTabBarStack.push_back(GetTabBarRefFromTabBar(tab_bar));
     g.CurrentTabBar = tab_bar;
 
+    // Append with multiple BeginTabBar()/EndTabBar() pairs.
     if (tab_bar->CurrFrameVisible == g.FrameCount)
     {
-        //IMGUI_DEBUG_LOG("BeginTabBarEx already called this frame\n", g.FrameCount);
-        //IM_ASSERT(0);
+        window->DC.CursorPos = tab_bar->TabsContentsMin;
         return true;
     }
 
     // Ensure correct ordering when toggling ImGuiTabBarFlags_Reorderable flag, or when a new tab was added while being not reorderable
     if ((flags & ImGuiTabBarFlags_Reorderable) != (tab_bar->Flags & ImGuiTabBarFlags_Reorderable) || (tab_bar->TabsAddedNew && !(flags & ImGuiTabBarFlags_Reorderable)))
-        if (tab_bar->Tabs.Size > 1 && (flags & ImGuiTabBarFlags_DockNode) == 0)
+        if (tab_bar->Tabs.Size > 1 && (flags & ImGuiTabBarFlags_DockNode) == 0) // FIXME: TabBar with DockNode can now be hybrid
             ImQsort(tab_bar->Tabs.Data, tab_bar->Tabs.Size, sizeof(ImGuiTabItem), TabItemComparerByBeginOrder);
     tab_bar->TabsAddedNew = false;
 
@@ -6966,12 +6931,15 @@ bool    ImGui::BeginTabBarEx(ImGuiTabBar* tab_bar, const ImRect& tab_bar_bb, ImG
     tab_bar->WantLayout = true; // Layout will be done on the first call to ItemTab()
     tab_bar->PrevFrameVisible = tab_bar->CurrFrameVisible;
     tab_bar->CurrFrameVisible = g.FrameCount;
+    tab_bar->PrevTabsContentsHeight = tab_bar->CurrTabsContentsHeight;
+    tab_bar->CurrTabsContentsHeight = 0.0f;
     tab_bar->FramePadding = g.Style.FramePadding;
     tab_bar->TabsActiveCount = 0;
 
     // Set cursor pos in a way which only be used in the off-chance the user erroneously submits item before BeginTabItem(): items will overlap
-    window->DC.CursorPos.x = tab_bar->BarRect.Min.x;
-    window->DC.CursorPos.y = tab_bar->BarRect.Max.y + g.Style.ItemSpacing.y;
+    tab_bar->TabsContentsMin.x = tab_bar->BarRect.Min.x;
+    tab_bar->TabsContentsMin.y = tab_bar->BarRect.Max.y + g.Style.ItemSpacing.y;
+    window->DC.CursorPos = tab_bar->TabsContentsMin;
 
     // Draw separator
     const ImU32 col = GetColorU32((flags & ImGuiTabBarFlags_IsFocused) ? ImGuiCol_TabActive : ImGuiCol_TabUnfocusedActive);
@@ -7004,15 +6972,22 @@ void    ImGui::EndTabBar()
         IM_ASSERT_USER_ERROR(tab_bar != NULL, "Mismatched BeginTabBar()/EndTabBar()!");
         return;
     }
-    if (tab_bar->WantLayout) // Fallback in case no TabItem have been submitted
+
+    // Fallback in case no TabItem have been submitted
+    if (tab_bar->WantLayout)
         TabBarLayout(tab_bar);
 
     // Restore the last visible height if no tab is visible, this reduce vertical flicker/movement when a tabs gets removed without calling SetTabItemClosed().
     const bool tab_bar_appearing = (tab_bar->PrevFrameVisible + 1 < g.FrameCount);
     if (tab_bar->VisibleTabWasSubmitted || tab_bar->VisibleTabId == 0 || tab_bar_appearing)
-        tab_bar->LastTabContentHeight = ImMax(window->DC.CursorPos.y - tab_bar->BarRect.Max.y, 0.0f);
+    {
+        tab_bar->CurrTabsContentsHeight = ImMax(window->DC.CursorPos.y - tab_bar->BarRect.Max.y, tab_bar->CurrTabsContentsHeight);
+        window->DC.CursorPos.y = tab_bar->BarRect.Max.y + tab_bar->CurrTabsContentsHeight;
+    }
     else
-        window->DC.CursorPos.y = tab_bar->BarRect.Max.y + tab_bar->LastTabContentHeight;
+    {
+        window->DC.CursorPos.y = tab_bar->BarRect.Max.y + tab_bar->PrevTabsContentsHeight;
+    }
 
     if ((tab_bar->Flags & ImGuiTabBarFlags_DockNode) == 0)
         PopID();
@@ -7124,7 +7099,7 @@ static void ImGui::TabBarLayout(ImGuiTabBar* tab_bar)
         // Additionally, when using TabBarAddTab() to manipulate tab bar order we occasionally insert new tabs that don't have a width yet,
         // and we cannot wait for the next BeginTabItem() call. We cannot compute this width within TabBarAddTab() because font size depends on the active window.
         const char* tab_name = tab_bar->GetTabName(tab);
-        const bool has_close_button = tab->Window ? tab->Window->HasCloseButton : ((tab->Flags & ImGuiTabItemFlags_NoCloseButton) == 0);
+        const bool has_close_button = (tab->Flags & ImGuiTabItemFlags_NoCloseButton) == 0;
         tab->ContentWidth = TabItemCalcSize(tab_name, has_close_button).x;
 
         int section_n = (tab->Flags & ImGuiTabItemFlags_Leading) ? 0 : (tab->Flags & ImGuiTabItemFlags_Trailing) ? 2 : 1;
@@ -7202,12 +7177,16 @@ static void ImGui::TabBarLayout(ImGuiTabBar* tab_bar)
         {
             ImGuiTabItem* tab = &tab_bar->Tabs[section_tab_index + tab_n];
             tab->Offset = tab_offset;
+            tab->NameOffset = -1;
             tab_offset += tab->Width + (tab_n < section->TabCount - 1 ? g.Style.ItemInnerSpacing.x : 0.0f);
         }
         tab_bar->WidthAllTabs += ImMax(section->Width + section->Spacing, 0.0f);
         tab_offset += section->Spacing;
         section_tab_index += section->TabCount;
     }
+
+    // Clear name buffers
+    tab_bar->TabsNames.Buf.resize(0);
 
     // If we have lost the selected tab, select the next most recently active one
     if (found_selected_tab_id == false)
@@ -7245,21 +7224,18 @@ static void ImGui::TabBarLayout(ImGuiTabBar* tab_bar)
     tab_bar->ScrollingRectMinX = tab_bar->BarRect.Min.x + sections[0].Width + sections[0].Spacing;
     tab_bar->ScrollingRectMaxX = tab_bar->BarRect.Max.x - sections[2].Width - sections[1].Spacing;
 
-    // Clear name buffers
-    if ((tab_bar->Flags & ImGuiTabBarFlags_DockNode) == 0)
-        tab_bar->TabsNames.Buf.resize(0);
-
     // Actual layout in host window (we don't do it in BeginTabBar() so as not to waste an extra frame)
     ImGuiWindow* window = g.CurrentWindow;
     window->DC.CursorPos = tab_bar->BarRect.Min;
     ItemSize(ImVec2(tab_bar->WidthAllTabsIdeal, tab_bar->BarRect.GetHeight()), tab_bar->FramePadding.y);
 }
 
-// Dockables uses Name/ID in the global namespace. Non-dockable items use the ID stack.
-static ImU32   ImGui::TabBarCalcTabID(ImGuiTabBar* tab_bar, const char* label)
+// Dockable uses Name/ID in the global namespace. Non-dockable items use the ID stack.
+static ImU32   ImGui::TabBarCalcTabID(ImGuiTabBar* tab_bar, const char* label, ImGuiWindow* docked_window)
 {
-    if (tab_bar->Flags & ImGuiTabBarFlags_DockNode)
+    if (docked_window != NULL)
     {
+        IM_ASSERT(tab_bar->Flags & ImGuiTabBarFlags_DockNode);
         ImGuiID id = ImHashStr(label);
         KeepAliveID(id);
         return id;
@@ -7548,7 +7524,7 @@ bool    ImGui::BeginTabItem(const char* label, bool* p_open, ImGuiTabItemFlags f
         IM_ASSERT_USER_ERROR(tab_bar, "Needs to be called between BeginTabBar() and EndTabBar()!");
         return false;
     }
-    IM_ASSERT(!(flags & ImGuiTabItemFlags_Button)); // BeginTabItem() Can't be used with button flags, use TabItemButton() instead!
+    IM_ASSERT((flags & ImGuiTabItemFlags_Button) == 0);             // BeginTabItem() Can't be used with button flags, use TabItemButton() instead!
 
     bool ret = TabItemEx(tab_bar, label, p_open, flags, NULL);
     if (ret && !(flags & ImGuiTabItemFlags_NoPushId))
@@ -7606,7 +7582,7 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
         return false;
 
     const ImGuiStyle& style = g.Style;
-    const ImGuiID id = TabBarCalcTabID(tab_bar, label);
+    const ImGuiID id = TabBarCalcTabID(tab_bar, label, docked_window);
 
     // If the user called us with *p_open == false, we early out and don't render.
     // We make a call to ItemAdd() so that attempts to use a contextual popup menu with an implicit ID won't use an older ID.
@@ -7656,9 +7632,10 @@ bool    ImGui::TabItemEx(ImGuiTabBar* tab_bar, const char* label, bool* p_open, 
     tab->Window = docked_window;
 
     // Append name with zero-terminator
-    if (tab_bar->Flags & ImGuiTabBarFlags_DockNode)
+    // (regular tabs are permitted in a DockNode tab bar, but window tabs not permitted in a non-DockNode tab bar)
+    if (tab->Window != NULL)
     {
-        IM_ASSERT(tab->Window != NULL);
+        IM_ASSERT(tab_bar->Flags & ImGuiTabBarFlags_DockNode);
         tab->NameOffset = -1;
     }
     else
@@ -7876,7 +7853,7 @@ void    ImGui::SetTabItemClosed(const char* label)
     if (is_within_manual_tab_bar)
     {
         ImGuiTabBar* tab_bar = g.CurrentTabBar;
-        ImGuiID tab_id = TabBarCalcTabID(tab_bar, label);
+        ImGuiID tab_id = TabBarCalcTabID(tab_bar, label, NULL);
         if (ImGuiTabItem* tab = TabBarFindTabByID(tab_bar, tab_id))
             tab->WantClose = true; // Will be processed by next call to TabBarLayout()
     }
@@ -7885,7 +7862,7 @@ void    ImGui::SetTabItemClosed(const char* label)
         if (window->DockIsActive)
             if (ImGuiDockNode* node = window->DockNode)
             {
-                ImGuiID tab_id = TabBarCalcTabID(node->TabBar, label);
+                ImGuiID tab_id = TabBarCalcTabID(node->TabBar, label, window);
                 TabBarRemoveTab(node->TabBar, tab_id);
                 window->DockTabWantClose = true;
             }
