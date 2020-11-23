@@ -22,7 +22,7 @@ project "imgui"
 
 	filter "system:windows"
 		systemversion "latest"
-		staticruntime (StaticRuntime)
+		staticruntime (staticRuntime)
 
 	filter "system:linux"
 		pic "on"
