@@ -19,7 +19,9 @@ project "imgui"
 		"imstb_textedit.h",
 		"imstb_truetype.h",
 		"imgui_demo.cpp"
-	}
+    }
+
+    includedirs "%{includeDir.stb}"
 
 	filter "system:windows"
 		systemversion "latest"

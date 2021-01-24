@@ -11,3 +11,11 @@ add_library(imgui
 	"imstb_truetype.h"
     "imgui_demo.cpp"
 )
+
+# for stb_sprintf
+# imgui_stb_dir = PROJECT_SOURCE_DIR/OverEngine/vendor/stb
+string(JOIN "/" imgui_stb_dir ${PROJECT_SOURCE_DIR} "OverEngine/vendor/stb")
+
+target_include_directories(imgui PRIVATE
+	${imgui_stb_dir}
+)
