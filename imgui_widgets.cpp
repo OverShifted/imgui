@@ -1,4 +1,4 @@
-// dear imgui, v1.80
+// dear imgui, v1.81 WIP
 // (widgets code)
 
 /*
@@ -6575,7 +6575,7 @@ void ImGui::EndMenuBar()
 bool ImGui::BeginMainMenuBar()
 {
     ImGuiContext& g = *GImGui;
-    ImGuiViewportP* viewport = g.Viewports[0];
+    ImGuiViewportP* viewport = (ImGuiViewportP*)GetMainViewport();
     ImGuiWindow* menu_bar_window = FindWindowByName("##MainMenuBar");
 
     // For the main menu bar, which cannot be moved, we honor g.Style.DisplaySafeAreaPadding to ensure text can be visible on a TV set.
@@ -7305,6 +7305,7 @@ static ImU32   ImGui::TabBarCalcTabID(ImGuiTabBar* tab_bar, const char* label, I
 {
     if (docked_window != NULL)
     {
+        IM_UNUSED(tab_bar);
         IM_ASSERT(tab_bar->Flags & ImGuiTabBarFlags_DockNode);
         ImGuiID id = ImHashStr(label);
         KeepAliveID(id);
